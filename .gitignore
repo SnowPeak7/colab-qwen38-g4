@@ -4,5 +4,7 @@
 *.log
 .drive_token.json
 drive_auth.json
+.sglang_api_key
+.cf_tunnel_token
 __pycache__/
 .DS_Store
