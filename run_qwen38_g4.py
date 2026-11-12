@@ -322,6 +322,14 @@ MEDIA_BLOCK_TYPES = frozenset({
     "input_file",
 })
 DANGEROUS_SCHEME_RE = re.compile(r"^(?:file|ftp|gopher|dict|ldap|ldaps|tftp|ssh|telnet|netdoc):", re.IGNORECASE)
+EFFORT_MAP = {
+    "xhigh": "xhigh",
+    "high": "xhigh",
+    "max": "xhigh",
+    "medium": "medium",
+    "low": "low",
+    "minimal": "low",
+}
 
 _failed_auth_by_ip: dict[str, collections.deque[float]] = collections.defaultdict(collections.deque)
 
@@ -424,6 +432,97 @@ def inspect_payload_for_ssrf(payload: object):
             stack.extend(cur)
 
 
+def _content_to_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\\n".join(p for p in parts if p)
+    return ""
+
+
+def normalize_openai_payload(payload: object) -> object:
+    """Adapt standard OpenAI/Agent client fields (developer role, reasoning_effort='high') to Qwen3.8 template."""
+    if not isinstance(payload, dict):
+        return payload
+
+    ct_kwargs = payload.get("chat_template_kwargs")
+    if not isinstance(ct_kwargs, dict):
+        ct_kwargs = {}
+
+    raw_effort = payload.get("reasoning_effort")
+    if raw_effort is None and isinstance(payload.get("reasoning"), dict):
+        raw_effort = payload["reasoning"].get("effort")
+    if raw_effort is None:
+        raw_effort = ct_kwargs.get("reasoning_effort")
+
+    if isinstance(raw_effort, str):
+        low_eff = raw_effort.strip().lower()
+        if low_eff in ("none", "off", "disable", "disabled"):
+            payload.pop("reasoning_effort", None)
+            ct_kwargs.pop("reasoning_effort", None)
+            ct_kwargs["enable_thinking"] = False
+            payload["chat_template_kwargs"] = ct_kwargs
+        else:
+            mapped = EFFORT_MAP.get(low_eff, "xhigh")
+            if "reasoning_effort" in payload:
+                payload["reasoning_effort"] = mapped
+            ct_kwargs["reasoning_effort"] = mapped
+            payload["chat_template_kwargs"] = ct_kwargs
+    elif "reasoning_effort" in payload and payload["reasoning_effort"] is None:
+        payload.pop("reasoning_effort", None)
+
+    payload.pop("reasoning", None)
+
+    msgs = payload.get("messages")
+    if isinstance(msgs, list) and msgs:
+        leading_sys_texts: list[str] = []
+        rest_msgs: list[dict] = []
+        in_leading_sys = True
+
+        for msg in msgs:
+            if not isinstance(msg, dict):
+                rest_msgs.append(msg)
+                in_leading_sys = False
+                continue
+            role = str(msg.get("role", "")).strip().lower()
+            if role in ("developer", "system"):
+                txt = _content_to_text(msg.get("content")).strip()
+                if in_leading_sys:
+                    if txt:
+                        leading_sys_texts.append(txt)
+                else:
+                    if txt:
+                        new_msg = dict(msg)
+                        new_msg["role"] = "user"
+                        new_msg["content"] = f"<system-reminder>\\n{txt}\\n</system-reminder>"
+                        rest_msgs.append(new_msg)
+            else:
+                in_leading_sys = False
+                if role not in ("user", "assistant", "tool"):
+                    new_msg = dict(msg)
+                    new_msg["role"] = "user"
+                    rest_msgs.append(new_msg)
+                else:
+                    rest_msgs.append(msg)
+
+        normalized_msgs: list[dict] = []
+        if leading_sys_texts:
+            normalized_msgs.append({
+                "role": "system",
+                "content": "\\n\\n".join(leading_sys_texts),
+            })
+        normalized_msgs.extend(rest_msgs)
+        payload["messages"] = normalized_msgs
+
+    return payload
+
+
 async def handle_proxy(request: web.Request) -> web.StreamResponse:
     now = time.monotonic()
     client_ip = get_client_ip(request)
@@ -457,6 +556,9 @@ async def handle_proxy(request: web.Request) -> web.StreamResponse:
             inspect_payload_for_ssrf(parsed_json)
         except ValueError as exc:
             return json_error(400, str(exc), "invalid_request_error")
+        if path == "/v1/chat/completions":
+            parsed_json = normalize_openai_payload(parsed_json)
+            body = json.dumps(parsed_json, ensure_ascii=False).encode("utf-8")
     else:
         return json_error(405, f"Method {method} is not allowed.", "invalid_request_error")
 

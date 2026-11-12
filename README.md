@@ -65,6 +65,7 @@ MODEL_ID=dealignai/Qwen3.8-Flash-Next-CYBERSECURITY-NVFP4
   - SGLang 仅绑定容器回环地址 `127.0.0.1:30000`，不直接暴露给公网隧道。
   - 网关强制恒定时间 Token 比对与来源 IP 鉴权失败限流，仅白名单放行标准 OpenAI 接口（`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/responses`、`/v1/embeddings`），拦截所有内部管理/调试路由。
   - 自动拦截多模态请求中的 `file://` 本地路径与云内网/元数据地址（SSRF 防护），并在开启公网隧道前执行启动自检。
+  - **OpenAI / Agent 客户端协议自动归一化**：网关自动将 `role: "developer"` 转换为首条 `"system"`（会话中途的 `developer`/`system` 消息自动转为带 `<system-reminder>` 的 `user` 消息），并将 `reasoning_effort: "high"` / `"max"` 映射为 Qwen 3.8 原生支持的 `"xhigh"`，开箱即用兼容 DeepSeek Harness (`dsh`) 桌面端、OpenAI SDK、`pi` 等客户端。
 - **供应链完整性校验**：对预编译 `SM120` 算子包与 `cloudflared` 二进制强制执行 SHA-256 校验，使用受控路径解压（拒绝路径穿越、符号链接与特殊权限位），并默认锁定 HuggingFace 模型仓库 commit revision。
 
 ## 4. 在 `pi` 中使用
