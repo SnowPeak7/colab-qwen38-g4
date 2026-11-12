@@ -4,11 +4,12 @@
 
 ## 1. 安装并登录 `colab` CLI
 
-推荐使用 `colab` CLI 默认的浏览器 OAuth 登录（最小权限，无需在本机落盘宽泛的 GCP `cloud-platform` 凭据）：
+推荐使用 `colab` CLI 默认的浏览器 OAuth 登录（最小权限，Token 加密存入系统钥匙串，无需在本机明文落盘宽泛的 GCP `cloud-platform` 凭据）：
 
 ```bash
 uv tool install google-colab-cli
-colab auth login
+uv tool update-shell
+colab sessions   # 首次运行会打印浏览器授权链接，登录并粘贴授权码即可完成绑定
 ```
 
 <details>

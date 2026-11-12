@@ -1112,10 +1112,14 @@ def run_local_interactive_wizard():
     print(" Qwen3.8-Flash-Next-CYBERSECURITY-NVFP4 · Google Colab G4 (96GB) Wizard")
     print("=" * 72)
 
+    local_uv_bin = str(Path.home() / ".local" / "bin")
+    if local_uv_bin not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = f"{local_uv_bin}{os.pathsep}{os.environ.get('PATH', '')}"
+
     if not shutil.which("colab"):
         print("Error: 'colab' CLI not found. Install & sign in first via:")
         print("  uv tool install google-colab-cli")
-        print("  colab auth login")
+        print("  colab sessions")
         sys.exit(1)
 
     session_name = prompt_choice("1. Colab session name", "qwen38-g4")
@@ -1151,6 +1155,10 @@ def run_local_interactive_wizard():
                 sys.exit(1)
 
     sess_res = subprocess.run(["colab", "sessions"], capture_output=True, text=True, check=False)
+    if sess_res.returncode != 0:
+        print("\n-> Signing in to Google Colab CLI (follow browser prompt)...")
+        subprocess.run(["colab", "sessions"], check=True)
+        sess_res = subprocess.run(["colab", "sessions"], capture_output=True, text=True, check=True)
     sess_out = (sess_res.stdout or "") + (sess_res.stderr or "")
     if f"[{session_name}]" not in sess_out:
         print(f"\n-> Allocating Google Colab G4 GPU instance '{session_name}'...")
